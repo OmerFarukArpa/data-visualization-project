@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leaflet.js Harita Örneği</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        #harita {
+            height: 1500px;
+        }
+
+        #formContainer {
+            margin: 20px 0;
+        }
+
+        .leaflet-popup-content-wrapper {
+            width: 400px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 1rem;
+        }
+
+        .leaflet-popup-content,
+        .leaflet-popup-content .card {
+            width: 100% !important;
+        }
+
+        .leaflet-popup-content button {
+            width: 100% !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="harita"></div>
+
+    <script>
+        let bolgeler;
+        let markers = {};
+
+        // Haritayı oluştur
+        var harita = L.map('harita').setView([41.34, 27.77], 8);
+
+        // Harita sağlayıcısını ekle
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+        }).addTo(harita);
+
+        // JSON dosyasını yükle
+        fetch('/bolgeler')
+            .then(response => response.json())
+            .then(data => {
+                bolgeler = data;
+                console.log(bolgeler);
+
+                // Lokasyonları haritaya ekle
+                addMarkersToMap(bolgeler);
+
+                // Çizgileri haritaya ekle
+                addGradientLinesToMap(bolgeler);
+            })
+            .catch(error => console.error('Error loading the JSON file:', error));
+
+        function addMarkersToMap(bolgeler) {
+            bolgeler.forEach(bolge => {
+                var popupContent = `
+                    <div class="card" style="width: 18rem;">
+                        <img src="${bolge.resim}" class="card-img-top" alt="${bolge.adi}">
+                        <div class="card-body">
+                            <h5 class="card-title">${bolge.adi}</h5>
+                            <button class="btn btn-primary" onclick='openEditPopup(${JSON.stringify(bolge)})'>Düzenle</button>
+                        </div>
+                    </div>
+                `;
+                var marker = L.marker(bolge.konum).addTo(harita)
+                    .bindPopup(popupContent);
+                markers[bolge.id] = marker;
+            });
+        }
+
+        function openEditPopup(bolge) {
+            var editFormContent = `
+                <form>
+                    <div class="form-group">
+                        <label for="editBolgeId">ID:</label>
+                        <input type="number" class="form-control" id="editBolgeId" name="editBolgeId" value="${bolge.id}" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label for="editBolgeAdi">Açıklama:</label>
+                        <textarea class="form-control" id="editBolgeAdi" name="editBolgeAdi">${bolge.adi}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="editBolgeKonum">Konum:</label>
+                        <input type="text" class="form-control" id="editBolgeKonum" name="editBolgeKonum" value="${bolge.konum.join(',')}" placeholder="lat,lon">
+                    </div>
+                    <div class="form-group">
+                        <label for="editBolgeResim">Resim URL:</label>
+                        <input type="text" class="form-control" id="editBolgeResim" name="editBolgeResim" value="${bolge.resim}">
+                    </div>
+                    <button type="button" class="btn btn-primary" onclick="updateBolge(${bolge.id})">Güncelle</button>
+                </form>
+            `;
+
+            // Lokasyonun üzerine tıklandığında düzenleme formunu popup içinde aç
+            L.popup()
+                .setLatLng(bolge.konum)
+                .setContent(editFormContent)
+                .openOn(harita);
+        }
+
+        function updateBolge(bolgeId) {
+            let updatedId = parseInt(document.getElementById('editBolgeId').value, 10);
+            let updatedAdi = document.getElementById('editBolgeAdi').value;
+            let updatedKonum = document.getElementById('editBolgeKonum').value.split(',').map(Number);
+            let updatedResim = document.getElementById('editBolgeResim').value;
+
+            let updatedBolge = {
+                id: updatedId,
+                adi: updatedAdi,
+                konum: updatedKonum,
+                resim: updatedResim
+            };
+
+            // Sunucuya güncellenen bilgileri gönder
+            fetch('/update-bolge', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updatedBolge)
+            })
+                .then(response => response.text())
+                .then(message => {
+                    console.log(message);
+                    // Güncellenen JSON verilerini yerel olarak güncelle
+                    const index = bolgeler.findIndex(bolge => bolge.id === updatedId);
+                    if (index !== -1) {
+                        bolgeler[index] = updatedBolge;
+
+                        // Haritadaki marker'ı güncelle
+                        let marker = markers[updatedId];
+                        if (marker) {
+                            marker.setLatLng(updatedKonum);
+                            marker.getPopup().setContent(`
+                                <div class="card" style="width: 18rem;">
+                                    <img src="${updatedResim}" class="card-img-top" alt="${updatedAdi}">
+                                    <div class="card-body">
+                                        <h5 class="card-title">${updatedAdi}</h5>
+                                        <button class="btn btn-primary" onclick='openEditPopup(${JSON.stringify(updatedBolge)})'>Düzenle</button>
+                                    </div>
+                                </div>
+                            `);
+                        }
+                    }
+                })
+                .catch(error => console.error('Error updating the JSON file:', error));
+        }
+
+        function addGradientLinesToMap(bolgeler) {
+            const colors = [
+                '#393E46', '#BE202E', '#BF381A', '#FC3C3C', '#FC3C3C', '#F25B02', '#FF6A00', '#FF8800', 
+                '#F8B500', '#FFF319', '#03585D', '#00A388', '#79BD8F', '#BEEB9F', '#355B8C', '#35648C', 
+                '#334F70', '#00ADB5', '#C5E2F6', '#6C5B7B', '#685C79', '#685C79', '#BCAAE8', '#C8C7FF', 
+                '#E2BBFF', '#AAB9E8', '#A6C4E0', '#C5D7ED'
+            ];
+
+            const steps = bolgeler.length - 1;
+            const colorsLength = colors.length;
+            const colorStep = steps / (colorsLength - 1);
+
+            for (let i = 0; i < steps; i++) {
+                let startPoint = bolgeler[i].konum;
+                let endPoint = bolgeler[i + 1].konum;
+                let latlngs = [startPoint, endPoint];
+
+                let startColorIndex = Math.floor(i / colorStep);
+                let endColorIndex = startColorIndex + 1;
+                let factor = (i % colorStep) / colorStep;
+
+                let startColor = hexToRgb(colors[startColorIndex]);
+                let endColor = hexToRgb(colors[endColorIndex]);
+
+                let interpolatedColor = interpolateColor(startColor, endColor, factor);
+                let hexColor = rgbToHex(interpolatedColor);
+
+                let polyline = L.polyline(latlngs, { color: hexColor }).addTo(harita);
+            }
+        }
+
+        function hexToRgb(hex) {
+            var bigint = parseInt(hex.slice(1), 16);
+            var r = (bigint >> 16) & 255;
+            var g = (bigint >> 8) & 255;
+            var b = (bigint & 255);
+            return [r, g, b];
+        }
+
+        function interpolateColor(color1, color2, factor) {
+            if (arguments.length < 3) { 
+                factor = 0.5; 
+            }
+            let result = color1.slice();
+            for (let i = 0; i < 3; i++) {
+                result[i] = Math.round(result[i] + factor * (color2[i] - result[i]));
+            }
+            return result;
+        }
+
+        function rgbToHex(rgb) {
+            return '#' + rgb.map(x => {
+                const hex = x.toString(16);
+                return hex.length === 1 ? '0' + hex : hex;
+            }).join('');
+        }
+    </script>
+</body>
+
+</html>
